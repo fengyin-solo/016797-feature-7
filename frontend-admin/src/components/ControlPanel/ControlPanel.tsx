@@ -9,6 +9,8 @@ import {
   Settings,
   AlertCircle,
   Play,
+  Pause,
+  Square,
 } from 'lucide-react';
 import { useAppStore } from '@/store/useAppStore';
 import { Select, Slider, Toggle, Button } from '@/components/ui';
@@ -18,14 +20,21 @@ import { useSpeechSynthesis } from '@/hooks/useSpeechSynthesis';
 export const ControlPanel: React.FC = () => {
   const sourceLang = useAppStore(state => state.sourceLang);
   const targetLang = useAppStore(state => state.targetLang);
-  const isMicOn = useAppStore(state => state.isMicOn);
+  const recognitionStatus = useAppStore(state => state.recognitionStatus);
   const audioSettings = useAppStore(state => state.audioSettings);
   const setSourceLang = useAppStore(state => state.setSourceLang);
   const setTargetLang = useAppStore(state => state.setTargetLang);
-  const toggleMic = useAppStore(state => state.toggleMic);
+  const startRecognition = useAppStore(state => state.startRecognition);
+  const pauseRecognition = useAppStore(state => state.pauseRecognition);
+  const resumeRecognition = useAppStore(state => state.resumeRecognition);
+  const stopRecognition = useAppStore(state => state.stopRecognition);
   const setAudioSettings = useAppStore(state => state.setAudioSettings);
 
   const { testSpeak, isSupported: ttsSupported } = useSpeechSynthesis();
+
+  const isIdle = recognitionStatus === 'idle';
+  const isListening = recognitionStatus === 'listening';
+  const isPaused = recognitionStatus === 'paused';
 
   const languageOptions = LANGUAGES.map(lang => ({
     value: lang.code,
@@ -33,8 +42,19 @@ export const ControlPanel: React.FC = () => {
   }));
 
   // 检查浏览器是否支持语音识别
-  const isSpeechSupported = typeof window !== 'undefined' && 
+  const isSpeechSupported = typeof window !== 'undefined' &&
     (!!window.SpeechRecognition || !!(window as typeof window & { webkitSpeechRecognition?: unknown }).webkitSpeechRecognition);
+
+  // 主按钮：开始 / 暂停 / 继续
+  const handleMainAction = () => {
+    if (isIdle) {
+      startRecognition();
+    } else if (isListening) {
+      pauseRecognition();
+    } else {
+      resumeRecognition();
+    }
+  };
 
   return (
     <aside className="w-full h-full flex-shrink-0 glass-panel rounded-2xl p-6 flex flex-col gap-6 overflow-y-auto">
@@ -69,30 +89,47 @@ export const ControlPanel: React.FC = () => {
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             <button
-              onClick={toggleMic}
+              onClick={handleMainAction}
               disabled={!isSpeechSupported}
               className={`
                 p-4 rounded-xl transition-all duration-300
-                ${!isSpeechSupported 
+                ${!isSpeechSupported
                   ? 'bg-dark-800 text-dark-600 cursor-not-allowed'
-                  : isMicOn
-                    ? 'bg-accent-red/20 text-accent-red recording-indicator'
-                    : 'bg-dark-700 text-dark-400 hover:bg-dark-600'
+                  : isListening
+                    ? 'bg-accent-yellow/20 text-accent-yellow recording-indicator'
+                    : isPaused
+                      ? 'bg-accent-green/20 text-accent-green hover:bg-accent-green/30'
+                      : 'bg-dark-700 text-dark-400 hover:bg-dark-600'
                 }
               `}
             >
-              {isMicOn ? (
-                <Mic className="w-6 h-6" />
+              {isListening ? (
+                <Pause className="w-6 h-6" />
+              ) : isPaused ? (
+                <Play className="w-6 h-6" />
               ) : (
                 <MicOff className="w-6 h-6" />
               )}
             </button>
+            {!isIdle && (
+              <button
+                onClick={stopRecognition}
+                title="停止识别"
+                className="p-4 rounded-xl transition-all duration-300 bg-accent-red/20 text-accent-red hover:bg-accent-red/30"
+              >
+                <Square className="w-6 h-6" />
+              </button>
+            )}
             <div>
               <p className="text-sm font-medium text-dark-200">
-                {isMicOn ? '录音中' : '已关闭'}
+                {isListening ? '录音中' : isPaused ? '已暂停' : '已关闭'}
               </p>
               <p className="text-xs text-dark-500">
-                {isMicOn ? '正在识别语音...' : '点击开始录音'}
+                {isListening
+                  ? '正在识别语音...'
+                  : isPaused
+                    ? '进度已保留，点击继续'
+                    : '点击开始录音'}
               </p>
             </div>
           </div>
@@ -100,8 +137,8 @@ export const ControlPanel: React.FC = () => {
 
         <Toggle
           label="自动识别"
-          checked={isMicOn}
-          onChange={toggleMic}
+          checked={!isIdle}
+          onChange={checked => (checked ? startRecognition() : stopRecognition())}
           icon={<Activity className="w-4 h-4" />}
           activeColor="bg-accent-red"
         />
@@ -119,6 +156,7 @@ export const ControlPanel: React.FC = () => {
           value={sourceLang}
           options={languageOptions}
           onChange={setSourceLang}
+          disabled={isPaused}
         />
 
 
@@ -127,7 +165,13 @@ export const ControlPanel: React.FC = () => {
           value={targetLang}
           options={languageOptions}
           onChange={setTargetLang}
+          disabled={isPaused}
         />
+        {isPaused && (
+          <p className="text-xs text-dark-500">
+            暂停中，语言设置已保留，继续识别后生效
+          </p>
+        )}
       </section>
 
       {/* 音频设置 - TTS语音播报 */}
@@ -189,10 +233,16 @@ export const ControlPanel: React.FC = () => {
         <div className="flex items-center gap-2 text-xs text-dark-500">
           <span
             className={`w-2 h-2 rounded-full ${
-              isMicOn ? 'bg-accent-green animate-pulse' : 'bg-dark-600'
+              isListening
+                ? 'bg-accent-green animate-pulse'
+                : isPaused
+                  ? 'bg-accent-yellow'
+                  : 'bg-dark-600'
             }`}
           />
-          <span>系统状态: {isMicOn ? '运行中' : '待机'}</span>
+          <span>
+            系统状态: {isListening ? '运行中' : isPaused ? '已暂停' : '待机'}
+          </span>
         </div>
       </div>
     </aside>

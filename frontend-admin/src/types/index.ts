@@ -31,12 +31,14 @@ export interface AudioSettings {
   ttsEnabled: boolean;
 }
 
+// 识别状态：idle-已关闭 listening-识别中 paused-已暂停（含异常中断后的可恢复状态）
+export type RecognitionStatus = 'idle' | 'listening' | 'paused';
+
 // 控制面板状态
 export interface ControlPanelState {
   sourceLang: string;
   targetLang: string;
-  isMicOn: boolean;
-  isRecording: boolean;
+  recognitionStatus: RecognitionStatus;
   audioSettings: AudioSettings;
 }
 
@@ -73,8 +75,7 @@ export interface AppState {
   // 控制面板
   sourceLang: string;
   targetLang: string;
-  isMicOn: boolean;
-  isRecording: boolean;
+  recognitionStatus: RecognitionStatus;
   audioSettings: AudioSettings;
   
   // 字幕
@@ -95,7 +96,11 @@ export interface AppState {
   // Actions
   setSourceLang: (lang: string) => void;
   setTargetLang: (lang: string) => void;
-  toggleMic: () => void;
+  startRecognition: () => void;
+  pauseRecognition: () => void;
+  resumeRecognition: () => void;
+  stopRecognition: () => void;
+  markInterrupted: (reason?: string) => void;
   setAudioSettings: (settings: Partial<AudioSettings>) => void;
   addSubtitle: (original: string, translated: string) => void;
   setCurrentSubtitle: (text: string) => void;

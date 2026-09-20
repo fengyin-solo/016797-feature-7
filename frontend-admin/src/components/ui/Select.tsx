@@ -13,6 +13,7 @@ interface SelectProps {
   onChange: (value: string) => void;
   icon?: React.ReactNode;
   placeholder?: string;
+  disabled?: boolean;
 }
 
 export const Select: React.FC<SelectProps> = ({
@@ -22,6 +23,7 @@ export const Select: React.FC<SelectProps> = ({
   onChange,
   icon,
   placeholder = '请选择',
+  disabled = false,
 }) => {
   return (
     <div className="space-y-2">
@@ -35,7 +37,8 @@ export const Select: React.FC<SelectProps> = ({
         <select
           value={value}
           onChange={e => onChange(e.target.value)}
-          className="select-field pr-10"
+          disabled={disabled}
+          className={`select-field pr-10 ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
         >
           <option value="" disabled>
             {placeholder}

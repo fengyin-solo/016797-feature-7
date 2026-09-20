@@ -215,29 +215,35 @@ export const useSpeechRecognition = () => {
   const shouldRestartRef = useRef(false);
   const speechDetectedRef = useRef(false);
   const resultReceivedRef = useRef(false);
-  
-  const isMicOn = useAppStore(state => state.isMicOn);
+  // 记录导致识别中断的错误，onend 时据此进入可恢复状态
+  const fatalErrorRef = useRef<string | null>(null);
+  // 最近一次已提交的最终结果，用于恢复后去重
+  const lastFinalRef = useRef<{ text: string; time: number } | null>(null);
+
+  const recognitionStatus = useAppStore(state => state.recognitionStatus);
   const sourceLang = useAppStore(state => state.sourceLang);
   const targetLang = useAppStore(state => state.targetLang);
 
   useEffect(() => {
     const SpeechRecognitionAPI = window.SpeechRecognition || window.webkitSpeechRecognition;
-    
+
     if (!SpeechRecognitionAPI) {
-      if (isMicOn) {
+      if (recognitionStatus === 'listening') {
         useAppStore.getState().addToast('error', '浏览器不支持语音识别');
+        useAppStore.getState().stopRecognition();
       }
       return;
     }
 
-    if (isMicOn) {
+    if (recognitionStatus === 'listening') {
       console.log('[语音识别] 🎯 初始化...');
-      
+
       const recognition = new SpeechRecognitionAPI();
       recognitionRef.current = recognition;
       shouldRestartRef.current = true;
       speechDetectedRef.current = false;
       resultReceivedRef.current = false;
+      fatalErrorRef.current = null;
 
       // 关键配置
       recognition.continuous = false;  // 改为 false，每次说完一句就停止
@@ -276,7 +282,7 @@ export const useSpeechRecognition = () => {
       recognition.onresult = (event: SpeechRecognitionEvent) => {
         resultReceivedRef.current = true;
         console.log('[语音识别] 📝 ===== 收到结果 =====');
-        
+
         const store = useAppStore.getState();
         const currentSourceLang = store.sourceLang;
         let interim = '';
@@ -286,7 +292,7 @@ export const useSpeechRecognition = () => {
           const result = event.results[i];
           const text = result[0].transcript;
           console.log(`[语音识别] [${i}] "${text}" isFinal=${result.isFinal}`);
-          
+
           if (result.isFinal) {
             final += text;
           } else {
@@ -308,12 +314,26 @@ export const useSpeechRecognition = () => {
             store.addToast('warning', '请使用设置的源语言说话');
             return;
           }
-          
+
+          // 恢复识别后浏览器可能重投暂停前的最终结果，同一条内容不重复记录
+          const trimmedFinal = final.trim();
+          const now = Date.now();
+          if (
+            lastFinalRef.current &&
+            lastFinalRef.current.text === trimmedFinal &&
+            now - lastFinalRef.current.time < 2000
+          ) {
+            console.log('[语音识别] ⚠️ 重复结果，已忽略:', trimmedFinal);
+            store.setCurrentSubtitle('');
+            return;
+          }
+          lastFinalRef.current = { text: trimmedFinal, time: now };
+
           console.log('[语音识别] ✅ 最终:', final);
           store.setCurrentSubtitle('');
           const translated = translateText(final, currentSourceLang, store.targetLang);
           store.addSubtitle(final, translated);
-          
+
           // 立即播报翻译结果
           speakText(translated, store.targetLang);
         }
@@ -321,15 +341,22 @@ export const useSpeechRecognition = () => {
 
       recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
         console.error('[语音识别] ❌ 错误:', event.error);
-        
+
         if (event.error === 'not-allowed') {
+          // 权限被拒绝无法自动恢复，直接回到关闭状态
           useAppStore.getState().addToast('error', '请允许麦克风权限');
           shouldRestartRef.current = false;
+          useAppStore.getState().stopRecognition();
         } else if (event.error === 'no-speech') {
           console.log('[语音识别] 未检测到语音');
         } else if (event.error === 'network') {
+          // 网络异常：记录错误，onend 时进入可恢复的暂停状态
           console.log('[语音识别] ⚠️ 网络错误');
-          useAppStore.getState().addToast('warning', '需要网络连接');
+          fatalErrorRef.current = 'network';
+        } else if (event.error === 'audio-capture' || event.error === 'service-not-allowed') {
+          // 音频设备/识别服务异常：同样进入可恢复状态
+          console.log('[语音识别] ⚠️ 识别服务异常:', event.error);
+          fatalErrorRef.current = event.error;
         }
       };
 
@@ -337,19 +364,35 @@ export const useSpeechRecognition = () => {
         console.log('[语音识别] 🔚 结束');
         console.log('[语音识别] speechDetected:', speechDetectedRef.current);
         console.log('[语音识别] resultReceived:', resultReceivedRef.current);
-        
+
         // 如果检测到语音但没有结果，说明可能是网络问题
         if (speechDetectedRef.current && !resultReceivedRef.current) {
           console.log('[语音识别] ⚠️ 检测到语音但无结果，可能是网络问题');
           useAppStore.getState().addToast('warning', '语音已检测但无法识别，请检查网络');
         }
-        
+
         // 重置状态
         speechDetectedRef.current = false;
         resultReceivedRef.current = false;
-        
+
+        // 识别被浏览器中断或网络异常：回到可恢复的暂停状态，保留已识别内容
+        const fatalError = fatalErrorRef.current;
+        fatalErrorRef.current = null;
+        if (fatalError) {
+          shouldRestartRef.current = false;
+          const store = useAppStore.getState();
+          if (store.recognitionStatus === 'listening') {
+            store.markInterrupted(
+              fatalError === 'network'
+                ? '网络异常，识别已暂停，点击继续可恢复'
+                : '识别被中断，点击继续可恢复'
+            );
+          }
+          return;
+        }
+
         // 自动重启
-        if (shouldRestartRef.current && useAppStore.getState().isMicOn) {
+        if (shouldRestartRef.current && useAppStore.getState().recognitionStatus === 'listening') {
           setTimeout(() => {
             if (shouldRestartRef.current && recognitionRef.current) {
               try {
@@ -370,6 +413,14 @@ export const useSpeechRecognition = () => {
         console.error('[语音识别] 启动失败:', e);
       }
 
+    } else if (recognitionStatus === 'paused') {
+      // 暂停：停止识别，但保留已识别内容与当前语言设置
+      console.log('[语音识别] ⏸️ 暂停');
+      shouldRestartRef.current = false;
+      if (recognitionRef.current) {
+        recognitionRef.current.abort();
+        recognitionRef.current = null;
+      }
     } else {
       console.log('[语音识别] 🛑 停止');
       shouldRestartRef.current = false;
@@ -387,10 +438,10 @@ export const useSpeechRecognition = () => {
         recognitionRef.current = null;
       }
     };
-  }, [isMicOn, sourceLang, targetLang]);
+  }, [recognitionStatus, sourceLang, targetLang]);
 
   return {
-    isSupported: typeof window !== 'undefined' && 
+    isSupported: typeof window !== 'undefined' &&
       (!!window.SpeechRecognition || !!window.webkitSpeechRecognition),
   };
 };

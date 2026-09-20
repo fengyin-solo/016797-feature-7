@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from 'react';
-import { Subtitles, Clock } from 'lucide-react';
+import { Subtitles, Clock, PauseCircle } from 'lucide-react';
 import { useAppStore } from '@/store/useAppStore';
 import { formatTime } from '@/utils/helpers';
 import { SubtitleItem } from './SubtitleItem';
@@ -7,8 +7,11 @@ import { SubtitleItem } from './SubtitleItem';
 export const SubtitleDisplay: React.FC = () => {
   const subtitles = useAppStore(state => state.subtitles);
   const currentSubtitle = useAppStore(state => state.currentSubtitle);
-  const isMicOn = useAppStore(state => state.isMicOn);
+  const recognitionStatus = useAppStore(state => state.recognitionStatus);
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  const isListening = recognitionStatus === 'listening';
+  const isPaused = recognitionStatus === 'paused';
 
   // 自动滚动到底部
   useEffect(() => {
@@ -41,11 +44,26 @@ export const SubtitleDisplay: React.FC = () => {
         ref={scrollRef}
         className="flex-1 overflow-y-auto p-6 space-y-4 scroll-smooth"
       >
+        {/* 暂停提示条：与控制面板状态同步流转 */}
+        {isPaused && (
+          <div className="flex items-center gap-2 p-3 bg-accent-yellow/10 border border-accent-yellow/30 rounded-lg">
+            <PauseCircle className="w-5 h-5 text-accent-yellow flex-shrink-0" />
+            <p className="text-xs text-dark-300">
+              识别已暂停，已识别内容与语言设置已保留，点击控制面板的继续按钮恢复
+            </p>
+          </div>
+        )}
         {subtitles.length === 0 && !currentSubtitle ? (
           <div className="flex flex-col items-center justify-center h-full text-dark-500">
-            <Subtitles className="w-16 h-16 mb-4 opacity-30" />
-            <p className="text-lg">暂无字幕内容</p>
-            <p className="text-sm mt-2">开启麦克风开始识别语音</p>
+            {isPaused ? (
+              <PauseCircle className="w-16 h-16 mb-4 opacity-30" />
+            ) : (
+              <Subtitles className="w-16 h-16 mb-4 opacity-30" />
+            )}
+            <p className="text-lg">{isPaused ? '识别已暂停' : '暂无字幕内容'}</p>
+            <p className="text-sm mt-2">
+              {isPaused ? '点击控制面板的继续按钮恢复识别' : '开启麦克风开始识别语音'}
+            </p>
           </div>
         ) : (
           <>
@@ -81,10 +99,16 @@ export const SubtitleDisplay: React.FC = () => {
           <div className="flex items-center gap-2">
             <span
               className={`w-2 h-2 rounded-full ${
-                isMicOn ? 'bg-accent-green animate-pulse' : 'bg-dark-600'
+                isListening
+                  ? 'bg-accent-green animate-pulse'
+                  : isPaused
+                    ? 'bg-accent-yellow'
+                    : 'bg-dark-600'
               }`}
             />
-            <span>{isMicOn ? '实时识别中' : '等待开始'}</span>
+            <span>
+              {isListening ? '实时识别中' : isPaused ? '已暂停' : '等待开始'}
+            </span>
           </div>
         </div>
       </footer>
