@@ -24,6 +24,10 @@ export interface TranslationResult {
   timestamp: Date;
 }
 
+// 识别状态
+// idle: 未开始 / 已停止；recording: 识别中；paused: 用户主动暂停；interrupted: 被浏览器或网络中断（可恢复）
+export type RecordingStatus = 'idle' | 'recording' | 'paused' | 'interrupted';
+
 // 音频设置
 export interface AudioSettings {
   volume: number;
@@ -35,8 +39,7 @@ export interface AudioSettings {
 export interface ControlPanelState {
   sourceLang: string;
   targetLang: string;
-  isMicOn: boolean;
-  isRecording: boolean;
+  recordingStatus: RecordingStatus;
   audioSettings: AudioSettings;
 }
 
@@ -73,8 +76,7 @@ export interface AppState {
   // 控制面板
   sourceLang: string;
   targetLang: string;
-  isMicOn: boolean;
-  isRecording: boolean;
+  recordingStatus: RecordingStatus;
   audioSettings: AudioSettings;
   
   // 字幕
@@ -95,9 +97,15 @@ export interface AppState {
   // Actions
   setSourceLang: (lang: string) => void;
   setTargetLang: (lang: string) => void;
-  toggleMic: () => void;
+  // 识别控制：开始 / 暂停 / 继续 / 完全停止 / 标记为被中断
+  startRecognition: () => void;
+  pauseRecognition: () => void;
+  resumeRecognition: () => void;
+  stopRecognition: () => void;
+  markRecognitionInterrupted: (reason: string) => void;
   setAudioSettings: (settings: Partial<AudioSettings>) => void;
-  addSubtitle: (original: string, translated: string) => void;
+  /** 追加一条已完成字幕；与最近记录内容相同则忽略，返回是否真正写入 */
+  addSubtitle: (original: string, translated: string) => boolean;
   setCurrentSubtitle: (text: string) => void;
   setInputText: (text: string) => void;
   translate: () => Promise<void>;

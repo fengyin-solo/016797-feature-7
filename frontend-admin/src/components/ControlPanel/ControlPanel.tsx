@@ -4,25 +4,30 @@ import {
   MicOff,
   Volume2,
   Gauge,
-  Activity,
   Languages,
   Settings,
   AlertCircle,
   Play,
+  Pause,
+  Square,
 } from 'lucide-react';
 import { useAppStore } from '@/store/useAppStore';
 import { Select, Slider, Toggle, Button } from '@/components/ui';
-import { LANGUAGES } from '@/utils/constants';
+import { LANGUAGES, RECORDING_STATUS_META } from '@/utils/constants';
 import { useSpeechSynthesis } from '@/hooks/useSpeechSynthesis';
+import type { RecordingStatus } from '@/types';
 
 export const ControlPanel: React.FC = () => {
   const sourceLang = useAppStore(state => state.sourceLang);
   const targetLang = useAppStore(state => state.targetLang);
-  const isMicOn = useAppStore(state => state.isMicOn);
+  const recordingStatus = useAppStore(state => state.recordingStatus);
   const audioSettings = useAppStore(state => state.audioSettings);
   const setSourceLang = useAppStore(state => state.setSourceLang);
   const setTargetLang = useAppStore(state => state.setTargetLang);
-  const toggleMic = useAppStore(state => state.toggleMic);
+  const startRecognition = useAppStore(state => state.startRecognition);
+  const pauseRecognition = useAppStore(state => state.pauseRecognition);
+  const resumeRecognition = useAppStore(state => state.resumeRecognition);
+  const stopRecognition = useAppStore(state => state.stopRecognition);
   const setAudioSettings = useAppStore(state => state.setAudioSettings);
 
   const { testSpeak, isSupported: ttsSupported } = useSpeechSynthesis();
@@ -33,8 +38,36 @@ export const ControlPanel: React.FC = () => {
   }));
 
   // 检查浏览器是否支持语音识别
-  const isSpeechSupported = typeof window !== 'undefined' && 
+  const isSpeechSupported = typeof window !== 'undefined' &&
     (!!window.SpeechRecognition || !!(window as typeof window & { webkitSpeechRecognition?: unknown }).webkitSpeechRecognition);
+
+  const statusMeta = RECORDING_STATUS_META[recordingStatus];
+  const isActive = recordingStatus !== 'idle';
+
+  // 主按钮：待机时开始；识别中时暂停；暂停 / 中断后继续
+  const handlePrimaryClick = () => {
+    if (recordingStatus === 'idle') {
+      startRecognition();
+    } else if (recordingStatus === 'recording') {
+      pauseRecognition();
+    } else {
+      resumeRecognition();
+    }
+  };
+
+  const primaryIcon: Record<RecordingStatus, React.ReactNode> = {
+    idle: <Mic className="w-6 h-6" />,
+    recording: <Pause className="w-6 h-6" />,
+    paused: <Play className="w-6 h-6" />,
+    interrupted: <Play className="w-6 h-6" />,
+  };
+
+  const primaryButtonClass: Record<RecordingStatus, string> = {
+    idle: 'bg-primary-500/20 text-primary-400 hover:bg-primary-500/30',
+    recording: 'bg-accent-red/20 text-accent-red recording-indicator',
+    paused: 'bg-accent-yellow/20 text-accent-yellow hover:bg-accent-yellow/30',
+    interrupted: 'bg-accent-yellow/20 text-accent-yellow hover:bg-accent-yellow/30',
+  };
 
   return (
     <aside className="w-full h-full flex-shrink-0 glass-panel rounded-2xl p-6 flex flex-col gap-6 overflow-y-auto">
@@ -65,46 +98,88 @@ export const ControlPanel: React.FC = () => {
           <Mic className="w-4 h-4" />
           麦克风控制
         </h3>
-        
+
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             <button
-              onClick={toggleMic}
+              onClick={handlePrimaryClick}
               disabled={!isSpeechSupported}
               className={`
                 p-4 rounded-xl transition-all duration-300
-                ${!isSpeechSupported 
+                ${!isSpeechSupported
                   ? 'bg-dark-800 text-dark-600 cursor-not-allowed'
-                  : isMicOn
-                    ? 'bg-accent-red/20 text-accent-red recording-indicator'
-                    : 'bg-dark-700 text-dark-400 hover:bg-dark-600'
+                  : primaryButtonClass[recordingStatus]
                 }
               `}
+              aria-label={statusMeta.label}
             >
-              {isMicOn ? (
-                <Mic className="w-6 h-6" />
-              ) : (
-                <MicOff className="w-6 h-6" />
-              )}
+              {primaryIcon[recordingStatus]}
             </button>
             <div>
               <p className="text-sm font-medium text-dark-200">
-                {isMicOn ? '录音中' : '已关闭'}
+                {statusMeta.label}
               </p>
               <p className="text-xs text-dark-500">
-                {isMicOn ? '正在识别语音...' : '点击开始录音'}
+                {isSpeechSupported ? statusMeta.panelHint : '当前浏览器不支持语音识别'}
               </p>
             </div>
           </div>
         </div>
 
-        <Toggle
-          label="自动识别"
-          checked={isMicOn}
-          onChange={toggleMic}
-          icon={<Activity className="w-4 h-4" />}
-          activeColor="bg-accent-red"
-        />
+        {/* 操作按钮组：暂停 / 继续为主操作，任何活动状态下都可完全停止 */}
+        <div className="flex gap-2">
+          {recordingStatus === 'idle' ? (
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={startRecognition}
+              disabled={!isSpeechSupported}
+              icon={<Play className="w-4 h-4" />}
+              className="flex-1"
+            >
+              开始识别
+            </Button>
+          ) : recordingStatus === 'recording' ? (
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={pauseRecognition}
+              icon={<Pause className="w-4 h-4" />}
+              className="flex-1"
+            >
+              暂停
+            </Button>
+          ) : (
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={resumeRecognition}
+              icon={<Play className="w-4 h-4" />}
+              className="flex-1"
+            >
+              {recordingStatus === 'interrupted' ? '恢复识别' : '继续'}
+            </Button>
+          )}
+
+          {isActive && (
+            <Button
+              variant="danger"
+              size="sm"
+              onClick={stopRecognition}
+              icon={<Square className="w-3.5 h-3.5" />}
+              className="flex-1"
+            >
+              停止
+            </Button>
+          )}
+        </div>
+
+        {!isActive && (
+          <div className="flex items-center gap-2 text-xs text-dark-500">
+            <MicOff className="w-3.5 h-3.5" />
+            <span>麦克风已关闭，暂停 / 中断的进度在停止后才会清空</span>
+          </div>
+        )}
       </section>
 
       {/* 语言设置 */}
@@ -141,7 +216,7 @@ export const ControlPanel: React.FC = () => {
           label="自动播放字幕翻译"
           checked={audioSettings.ttsEnabled}
           onChange={checked => setAudioSettings({ ttsEnabled: checked })}
-          icon={<Activity className="w-4 h-4" />}
+          icon={<Volume2 className="w-4 h-4" />}
           activeColor="bg-primary-500"
         />
 
@@ -176,7 +251,7 @@ export const ControlPanel: React.FC = () => {
         >
           测试播报
         </Button>
-        
+
         {!ttsSupported && (
           <p className="text-xs text-accent-yellow">
             您的浏览器不支持语音播报功能
@@ -188,11 +263,9 @@ export const ControlPanel: React.FC = () => {
       <div className="mt-auto pt-4 border-t border-white/10">
         <div className="flex items-center gap-2 text-xs text-dark-500">
           <span
-            className={`w-2 h-2 rounded-full ${
-              isMicOn ? 'bg-accent-green animate-pulse' : 'bg-dark-600'
-            }`}
+            className={`w-2 h-2 rounded-full ${statusMeta.dotClass}`}
           />
-          <span>系统状态: {isMicOn ? '运行中' : '待机'}</span>
+          <span>系统状态: {statusMeta.label}</span>
         </div>
       </div>
     </aside>
